@@ -1,0 +1,149 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+  <meta charset="UTF-8">
+  <title>Supervision Réseau de Capteurs</title>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/paho-mqtt/1.0.1/mqttws31.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+  <style>
+    body { font-family: Arial, sans-serif; background: #f4f6f9; margin: 20px; color: #333; }
+    h2 { margin-bottom: 5px; }
+    .stats { font-weight: bold; margin-bottom: 20px; background: #e3f2fd; padding: 12px; border-radius: 8px; font-size: 1.1em; }
+    .grid { display: flex; gap: 20px; }
+    .sidebar { width: 320px; flex-shrink: 0; }
+    .card { background: white; padding: 15px; border-radius: 8px; margin-bottom: 12px; box-shadow: 0 2px 4px rgba(0,0,0,0.08); border-left: 5px solid #2196F3; }
+    .card h4 { margin: 0 0 5px 0; }
+    .card small { color: #666; }
+    .card .val { margin-top: 10px; font-size: 0.95em; }
+    .main { flex-grow: 1; }
+    .chart-box { background: white; padding: 15px; border-radius: 8px; margin-bottom: 20px; box-shadow: 0 2px 4px rgba(0,0,0,0.08); }
+  </style>
+</head>
+<body>
+
+<h2>CAPTEURS DÉPLOYÉS (5)</h2>
+<p><small>Sélectionnés pour filtrer les courbes</small></p>
+
+<!-- 2 & 3. Moyennes globales -->
+<div class="stats">
+  Moy. Temp.: <span id="avg-temp">--</span> °C &nbsp;|&nbsp; Moy. Humidité: <span id="avg-hum">--</span> %
+</div>
+
+<div class="grid">
+  <!-- 1. Cartes des 5 capteurs -->
+  <div class="sidebar" id="sensor-cards"></div>
+
+  <!-- 4 & 5. Graphiques d'historiques -->
+  <div class="main">
+    <div class="chart-box">
+      <h3>Historique de Température (°C)</h3>
+      <p><small>Plage autorisée: -40.0°C à +85.0°C</small></p>
+      <canvas id="tempChart"></canvas>
+    </div>
+    <div class="chart-box">
+      <h3>Historique d'Humidité Relative (%)</h3>
+      <p><small>Plage autorisée: 0.0% à 100.0%</small></p>
+      <canvas id="humChart"></canvas>
+    </div>
+  </div>
+</div>
+
+<script>
+  // Liste des 5 capteurs demandés dans le sujet
+  const sensors = {
+    'dia/poly/env': { name: 'Salle polyvalente', temp: null, hum: null, color: '#2196F3' },
+    'dia/a110/env': { name: 'Salle de cours A110', temp: null, hum: null, color: '#4CAF50' },
+    'dia/b218/env': { name: 'Salle de cours B218', temp: null, hum: null, color: '#FF9800' },
+    'dia/c011/env': { name: 'Bureau C011', temp: null, hum: null, color: '#9C27B0' },
+    'dia/bs12/env': { name: 'Atelier BS12', temp: null, hum: null, color: '#F44336' }
+  };
+
+  // 1. Affichage dynamique des cartes HTML
+  const container = document.getElementById('sensor-cards');
+  Object.keys(sensors).forEach(topic => {
+    container.innerHTML += `
+      <div class="card" style="border-left-color: ${sensors[topic].color}">
+        <h4>${sensors[topic].name}</h4>
+        <small>${topic}</small>
+        <div class="val">
+          <strong>Température:</strong> <span id="temp-${topic}">--</span> °C<br>
+          <strong>Humidité:</strong> <span id="hum-${topic}">--</span> %
+        </div>
+      </div>`;
+  });
+
+  // 4 & 5. Initialisation des Graphiques
+  const maxPoints = 15;
+  const labels = [];
+  
+  const tempChart = new Chart(document.getElementById('tempChart'), {
+    type: 'line',
+    data: { labels: labels, datasets: [{ label: 'Température (°C)', data: [], borderColor: '#F44336', fill: false, tension: 0.2 }] },
+    options: { scales: { y: { min: -40, max: 85 } } }
+  });
+
+  const humChart = new Chart(document.getElementById('humChart'), {
+    type: 'line',
+    data: { labels: labels, datasets: [{ label: 'Humidité (%)', data: [], borderColor: '#2196F3', fill: false, tension: 0.2 }] },
+    options: { scales: { y: { min: 0, max: 100 } } }
+  });
+
+  // Connexion MQTT WebSockets au broker public HiveMQ
+  const client = new Paho.MQTT.Client("broker.hivemq.com", 8000, "web_visu_" + Math.floor(Math.random() * 1000));
+
+  client.onMessageArrived = (message) => {
+    const topic = message.destinationName;
+    const values = message.payloadString.split(',');
+    
+    if (values.length === 2 && sensors[topic]) {
+      const temp = parseFloat(values[0]);
+      const hum = parseFloat(values[1]);
+
+      sensors[topic].temp = temp;
+      sensors[topic].hum = hum;
+
+      // Mettre à jour la carte du capteur
+      document.getElementById(`temp-${topic}`).innerText = temp.toFixed(1);
+      document.getElementById(`hum-${topic}`).innerText = hum.toFixed(1);
+
+      // Recalculer les moyennes
+      updateAverages();
+
+      // Mettre à jour les graphiques
+      const timeStr = new Date().toLocaleTimeString();
+      if (labels.length >= maxPoints) labels.shift();
+      labels.push(timeStr);
+
+      tempChart.data.datasets[0].data.push(temp);
+      if (tempChart.data.datasets[0].data.length > maxPoints) tempChart.data.datasets[0].data.shift();
+      tempChart.update();
+
+      humChart.data.datasets[0].data.push(hum);
+      if (humChart.data.datasets[0].data.length > maxPoints) humChart.data.datasets[0].data.shift();
+      humChart.update();
+    }
+  };
+
+  function updateAverages() {
+    let tempSum = 0, humSum = 0, count = 0;
+    Object.values(sensors).forEach(s => {
+      if (s.temp !== null) {
+        tempSum += s.temp;
+        humSum += s.hum;
+        count++;
+      }
+    });
+    if (count > 0) {
+      document.getElementById('avg-temp').innerText = (tempSum / count).toFixed(1);
+      document.getElementById('avg-hum').innerText = (humSum / count).toFixed(1);
+    }
+  }
+
+  client.connect({
+    onSuccess: () => {
+      Object.keys(sensors).forEach(t => client.subscribe(t));
+    }
+  });
+</script>
+</body>
+</html>
