@@ -24,16 +24,16 @@
 <h2>CAPTEURS DÉPLOYÉS (5)</h2>
 <p><small>Sélectionnés pour filtrer les courbes</small></p>
 
-<!-- 2 & 3. Moyennes globales -->
+<!-- Moyennes globales -->
 <div class="stats">
   Moy. Temp.: <span id="avg-temp">--</span> °C &nbsp;|&nbsp; Moy. Humidité: <span id="avg-hum">--</span> %
 </div>
 
 <div class="grid">
-  <!-- 1. Cartes des 5 capteurs -->
+  <!-- Cartes des 5 capteurs -->
   <div class="sidebar" id="sensor-cards"></div>
 
-  <!-- 4 & 5. Graphiques d'historiques -->
+  <!-- Graphiques d'historiques -->
   <div class="main">
     <div class="chart-box">
       <h3>Historique de Température (°C)</h3>
@@ -49,7 +49,7 @@
 </div>
 
 <script>
-  // Liste des 5 capteurs demandés dans le sujet
+  // Liste des 5 capteurs du TP
   const sensors = {
     'dia/poly/env': { name: 'Salle polyvalente', temp: null, hum: null, color: '#2196F3' },
     'dia/a110/env': { name: 'Salle de cours A110', temp: null, hum: null, color: '#4CAF50' },
@@ -58,7 +58,7 @@
     'dia/bs12/env': { name: 'Atelier BS12', temp: null, hum: null, color: '#F44336' }
   };
 
-  // 1. Affichage dynamique des cartes HTML
+  // Affichage dynamique des cartes HTML
   const container = document.getElementById('sensor-cards');
   Object.keys(sensors).forEach(topic => {
     container.innerHTML += `
@@ -72,7 +72,7 @@
       </div>`;
   });
 
-  // 4 & 5. Initialisation des Graphiques
+  // Initialisation des Graphiques
   const maxPoints = 15;
   const labels = [];
   
@@ -88,8 +88,8 @@
     options: { scales: { y: { min: 0, max: 100 } } }
   });
 
-  // Connexion MQTT WebSockets au broker public HiveMQ
-  const client = new Paho.MQTT.Client("broker.hivemq.com", 8000, "web_visu_" + Math.floor(Math.random() * 1000));
+  // Connexion sécurisée WSS (Port 8884) pour GitHub Pages HTTPS
+  const client = new Paho.MQTT.Client("broker.hivemq.com", 8884, "web_visu_" + Math.floor(Math.random() * 1000));
 
   client.onMessageArrived = (message) => {
     const topic = message.destinationName;
@@ -102,14 +102,14 @@
       sensors[topic].temp = temp;
       sensors[topic].hum = hum;
 
-      // Mettre à jour la carte du capteur
+      // Mise à jour de la carte du capteur
       document.getElementById(`temp-${topic}`).innerText = temp.toFixed(1);
       document.getElementById(`hum-${topic}`).innerText = hum.toFixed(1);
 
-      // Recalculer les moyennes
+      // Calcul des moyennes
       updateAverages();
 
-      // Mettre à jour les graphiques
+      // Mise à jour des graphiques
       const timeStr = new Date().toLocaleTimeString();
       if (labels.length >= maxPoints) labels.shift();
       labels.push(timeStr);
@@ -139,7 +139,9 @@
     }
   }
 
+  // Active le SSL pour chiffrer la connexion WebSocket
   client.connect({
+    useSSL: true,
     onSuccess: () => {
       Object.keys(sensors).forEach(t => client.subscribe(t));
     }
